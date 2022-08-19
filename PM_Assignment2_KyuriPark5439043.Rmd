@@ -1,0 +1,344 @@
+---
+title: \vspace{-1.5cm} Psychometrics Assignment2
+author: "Kyuri Park 5439043"
+date: '`r format(Sys.Date(), "%B %d %Y")`'
+geometry: margin=0.7in
+output: pdf_document
+    # number_sections: no
+    # toc: true
+    # toc_depth: 2
+---
+
+\fontsize{11}{15}
+\selectfont
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 0. Preparation
+```{r, comment=" ", message=FALSE}
+## load the necessary packages
+library(ltm)
+library(dplyr)
+library(tidyr)
+library(knitr)
+library(kableExtra)
+
+## load data
+dat <- read.table("Assign2.dat")
+head(dat); dim(dat)
+```
+
+# 1. Fixed effects Rasch model
+## 1a. Fit the fixed effects Rasch model to the data.
+```{r, comment=""}
+## First, remove the cases of zero score and perfect score
+cleaned_dat <- dat[-(which(rowSums(dat) == 0 | rowSums(dat) ==15)),]
+
+## Check if there is any item with zero variance (either all zero or all one) 
+colSums(dat) == 0  # no item with zero variance 
+colSums(dat) == 2000 # no item with zero variance 
+
+## Check the sample size of the cleaned data and assign it to n
+n <- nrow(cleaned_dat); n
+
+## Add the person factor to the data
+cleaned_dat$pf <- factor(1:n)
+
+## Check the data again
+head(cleaned_dat)
+```
+
+
+```{r, comment=""}
+## Convert the data to a long format
+longdat <- gather(cleaned_dat, item, score, V1:V15, factor_key=TRUE)
+head(longdat)
+```
+
+```{r cache=TRUE}
+## Fit the fixed effects Rasch model to the data by fitting the logistic regression
+fixed.Rasch <- glm(score ~ pf + item, family = "binomial", data =longdat)
+```
+
+```{r, modeloutput, results="hide"}
+## Summary of the fixed effects Rasch model(in Appendix)
+summary(fixed.Rasch)
+```
+***Note***: The model output (summary) can be found in the *Appendix* at the end of the document.  
+
+```{r}
+## Extract the parameter estimates
+parameters <- coef(fixed.Rasch)
+
+## Store the person factors as "theta" and item factors as "difficulty" 
+theta <- parameters[1:1569] # person factor
+difficulty <- parameters[1570:1583] # item factor
+
+## Calculate the estimates under the usual parametrization of the fixed effect Rasch model
+# The first person factor (intercept) is the reference.
+# The rest of person factor estimates are the difference from the reference person factor.
+# In order to get the original person factor estimates, 
+# we need to add this reference value to the rest.
+theta <- as.data.frame(c(theta[1], theta[-1] + theta[1]))
+
+# Set the sum of the difficulty parameters to be equal to zero (usual identification constraint)
+difficulty <- scale(difficulty, center = TRUE)
+```
+
+## 1b. Create a table with as many rows as there are unweighted total scores and put the total scores in the first column.
+```{r}
+## Create a dataframe named "table" that contains unweighted total scores
+table <- data.frame(unweighted.total.scores = 0:15)
+## Create a table just with the unweighted total scores
+kable(table, col.names ="unweighted total score", align = "c", booktab=T, linesep = "")%>% 
+  row_spec(0,bold=TRUE) %>% kable_styling(position="center",font_size = 11, 
+                                          latex_options="hold_position")
+```
+
+## 1c. Add a second column with the corresponding joint maximum likelihood estimates of the person parameters.
+```{r}
+## Get the person factor estimates for each of the unweighted total score
+# First, store the sorted total scores in "sorted.totalscores"
+sorted.totalscores <- sort(unique(rowSums(cleaned_dat[,-16])))
+
+# Then, extract the theta value for each of the total scores and store them in "fixedRaschtheta"
+# (same total scores produce the same person parameter estimate)
+fixedRaschtheta <- matrix(NA, 16, 1) # storage matrix
+dimnames(fixedRaschtheta) <- list(0:15,"theta") # set the row/column name of matrix
+for (i in seq_along(sorted.totalscores)){
+  pf.index <- cleaned_dat[which(rowSums(cleaned_dat[,-16])==i),]$pf
+  fixedRaschtheta[i+1,] <- unique(round(theta[pf.index,], 4))
+}
+## Add the person factor estimates to the dataframe "table" which is created earlier
+table$pf.fixedRasch <- fixedRaschtheta
+
+## Create a table with the unweighted total scores + joint MLE person parameter estimates
+kable(table, col.names =c("unweighted total score", "fixed effects Rasch"),
+      row.names = F, align = "cc", linesep = "", booktab=T) %>% row_spec(0, bold=TRUE) %>% 
+  kable_styling(position="center", latex_options = "HOLD_position", font_size = 11)
+```
+\newpage
+## 1d. How many examinees do not have a person parameter estimate under the fixed effects Rasch model?
+There are in total 431 examinees that do not have a person parameter estimates under the fixed effects Rasch model, because they have either a zero or perfect score whose joint MLE does not exist.
+```{r}
+sum(rowSums(dat) == 0 | rowSums(dat) ==15)
+```
+
+# 2. Random effects Rasch model
+
+## 2a. Fit the random effects Rasch model to the data under the assumption of a normally distributed latent variable.
+```{r}
+## Fit the random effects Rasch model under the normality assumption for the latent variable
+mml1 <- rasch(dat) # using 'ltm' package
+```
+
+```{r, summaryrandomRasch, results="hide"}
+## Summary of the random effects Rasch model(in Appendix)
+summary(mml1)
+```
+***Note***: The model output (summary) can be found in the *Appendix* at the end of the document.  
+  
+## 2b. Test the goodness of fit of this random effects Rasch model. Does the model fit to the data? Why?
+The random effects Rasch model is tested against the more general random effects two-parameter logistic model. As the result of the likelihood ratio test is significant (p <.001), the null hypothesis model (the simpler random effects Rasch model) is rejected in favor of the alternative hypothesis model (more general two-parameter logistic model). Thus, it is concluded that the random effects Rasch model does not fit to the data well.
+
+```{r, comment=""}
+## Test the Rasch model against the two-parameter logistic model
+mml2 <- ltm(dat~z1)
+anova(mml1, mml2)
+```
+
+
+## 2c. Add a third column to the earlier created table in 1.b. Calculate the EAP person parameter estimates under this so-called normal random effects Rasch model and put these estimates in the third column of the table.
+```{r}
+## Calculate the EAP person parameter estimates using factor.scores
+EAPpar <- factor.scores(mml1, method='EAP')$score.dat
+
+# Store the sorted total scores in "sorted.total.mml"
+sorted.total.mml <- unique(apply(EAPpar[,1:15], 1, sum))
+
+# Extract the unique EAP person parameter estimates for each of the total scores
+# and store them in "random.Rasch.theta"
+random.Rasch.theta <- matrix(NA, 16, 1)
+for (i in seq_along(sorted.total.mml)){
+  z1s <- EAPpar[which(rowSums(EAPpar[,1:15])== i-1),]$z1
+  random.Rasch.theta[i,] <- unique(round(z1s, 4))
+}
+```
+
+```{r, results='hold'}
+## Add the third column to the table: 
+## EAP person parameter estimates under the normal random effects Rasch model
+table$random.Rasch.theta <- random.Rasch.theta
+kable(table, col.names =c("unweighted total score", "fixed effects Rasch", 
+                          "random effects Rasch"),row.names = F, align = "ccc",
+      format="latex", booktab=T, linesep="") %>% row_spec(0,bold=TRUE) %>% 
+  kable_styling(position="center",latex_options = "HOLD_position", font_size = 11)
+```
+
+# 3. Extended Rasch model
+
+## 3a-1. Fit extended Rasch models to the data. Find the simplest extended Rasch model that cannot be rejected using Pearson goodness of fit test.
+```{r}
+## First add a vector of ones named "fr" to the data
+# (later to be filled with the observed frequency)
+dat$fr <- rep(1, nrow(dat))
+
+## Create the outcome variable: observed score pattern frequency
+agg.data <- aggregate(fr~V1+V2+V3+V4+V5+V6+V7+V8+V9+V10+V11+V12+V13+V14+V15, data=dat, sum)
+
+## Calculate y (the total scores)
+y <- rowSums(agg.data[,1:15]) 
+
+## Calculate the continuous covariates: c2, ..., c15
+cs <- matrix(NA, 814, 14)
+colnames(cs) <- c("c2","c3","c4","c5","c6","c7","c8","c9","c10",
+                  "c11","c12","c13","c14","c15")
+for(i in 2:15){
+  cs[,i-1] <- choose(y, i)
+}
+## Add the calculated vectors "cs" to the aggregated data
+agg.data <- cbind(agg.data, cs) 
+```
+
+***Note***: All the summary outputs of the following extended Rasch models can be found in the *Appendix* at the end of the document.  
+
+```{r, fit extendedRasch1, comment="", results="hide"}
+## 1) Fit the extended Rasch model with all predictors 
+## including k main effects of item scores and k-1 main effects of covariates: c2 to c15
+fit1 <- glm(fr~., family=poisson, data=agg.data)
+summary(fit1) # effects of c3,...,c15 are not significant
+```
+
+```{r, comment=""}
+## Assess GoF using Pearson statistic: it fits well (p = 0.884)
+PS1 <- sum(residuals(fit1,type='pearson')^2)
+pval1 <- pchisq(PS1, fit1$df.residual,lower.tail=F)
+```
+
+The extended Rasch model including all k main effects of item scores and k-1 main effects of covariates (`c2` to `c15`) fits to the data as $p = 0.884$. The estimation result shows that the effects of `c3`,...,`c15` are not significant. Hence, the following extended Rasch model is fitted without the main effects of `c3`,...,`c15` (only including `c2`).
+
+```{r, fit extendedRasch2, comment="", results='hide'}
+## 2) Fit the extended Rasch model excluding the non-significant c3,...,c15
+fit2 <- glm(fr~V1+V2+V3+V4+V5+V6+V7+V8+V9+V10+V11+V12+V13+V14+V15+c2, 
+            family=poisson, data=agg.data)
+summary(fit2)
+```
+```{r, comment=""}
+## Assess GoF using Pearson statistic: it does not fit well (p <.001)
+PS2 <- sum(residuals(fit2,type='pearson')^2)
+pval2 <- pchisq(PS2, fit2$df.residual,lower.tail=F)
+cat("p-value =", pval2)
+```
+
+The model excluding `c3`,...,`c15` is rejected as $p <.001$. This model does not fit to the data well. Hence, the following extended Rasch model is fitted with an additional covariate `c3` (including `c2` and `c3`).
+
+```{r, fit extendedRasch3, comment="", results='hide'}
+## 3) Fit the extended Rasch model adding "c3" to the previous model
+fit3 <- glm(fr~V1+V2+V3+V4+V5+V6+V7+V8+V9+V10+V11+V12+V13+V14+V15+c2+c3,
+            family=poisson,data=agg.data)
+summary(fit3)
+```
+```{r, comment=""}
+## Assess GoF using Pearson statistic: it does not fit well (p <.001)
+PS3 <- sum(residuals(fit3,type='pearson')^2)
+pval3 <- pchisq(PS3, fit3$df.residual,lower.tail=F)
+cat("p-value =", pval3)
+```
+
+The model including only `c2` and `c3` is rejected as $p <.001$. This model does not fit to the data well. Hence, the following extended Rasch model is fitted with an additional covariate `c4` (including `c2`, `c3`, and `c4`).
+
+```{r, fit extendedRasch4, comment="", results='hide'}
+## 4) Fit the extended Rasch model adding "c4" to the previous model
+fit4 <- glm(fr~V1+V2+V3+V4+V5+V6+V7+V8+V9+V10+V11+V12+V13+V14+V15+c2+c3+c4,
+            family=poisson,data=agg.data)
+summary(fit4)
+```
+```{r, comment=""}
+## Assess GoF using Pearson statistic: it fits well (p = 0.99)
+PS4 <- sum(residuals(fit4, type='pearson')^2)
+pval4 <- pchisq(PS4, fit4$df.residual,lower.tail=F)
+cat("p-value =", pval4)
+```
+
+The model including `c2`, `c3`, and `c4` is not rejected as $p = 0.99$. There is no evidence against this model. Therefore, it is concluded that the simplest extended Rasch model that cannot be rejected based on the Pearson GoF test is the one including `c2`, `c3` and `c4` (`fit4` above).
+\newpage
+
+## 3a-2. Assuming the estimates are the maximum likelihood estimates of the corresponding random effects Rasch model, calculate the EAP person parameter estimates under this simplest extended Rasch model.
+
+```{r, Compute EAP} 
+## Calculate EAP estimate under the simplest extended Rasch model found above (fit4)
+
+## 1) Estimates of Nus (obtained from the summary output of the model)
+nu2 <- 0.893298 
+nu3 <- -0.258016
+nu4 <- 0.046182
+
+## 2) The first derivatives p2(alpha'x), p3(alpha'x), and p4(alpha'x), 
+## where alpha is a vector of 1 --> alpha'x = y (unweighted total score)
+p2 <- y - (1/2)
+p3 <- (1/2)*y^2 - y + 1/3
+p4 <- (1/6)*y^3 - (3/4)*y^2 + (11/12)*y - (1/4)
+
+## 3) EAP estimates are the sum of the products (estimate of nu * the first derivatives)
+EAPestimates <- nu2*p2 + nu3*p3 + nu4*p4
+
+## 4) Extract the EAP person parameter estimates for each of the total scores
+## and store them in "extended.Rasch"
+extended.Rasch <- matrix(NA, 16, 1)
+for (i in seq_along(sort(unique(y)))){
+  EAP <- EAPestimates[which(y == i-1)]
+  extended.Rasch[i,] <- unique(EAP)
+}
+```
+
+## 3a-3. Put the calculated EAP person parameter estimates in a new fourth column of the earlier created table in 1.b.
+
+```{r, fig.align='center'}
+## Add the fourth column to the table: 
+## EAP person parameter estimates under the extended Rasch model 
+table$extended.Rasch.teta <- extended.Rasch
+kable(round(table, 4), col.names =c("unweighted total score", "fixed effects Rasch",
+                                    "random effects Rasch", "extended Rasch"),
+      row.names = F, align = "cccc", format="latex", booktab=T, linesep="") %>%
+  row_spec(0,bold=TRUE) %>% kable_styling(position="center",font_size = 11)
+```
+
+\newpage
+# 4. Discuss the results and give an overall conclusion.
+As seen in the table above, the values of the person parameter estimates differ in each model. Yet, in all three models, the person parameter estimates increase with the unweighted total score: the higher the unweighted total scores, the higher the person parameter estimates.  
+
+One thing to note is that there is no estimate for the zero and perfect total scores in the fixed effects Rasch model, as they cannot be estimated under the joint MLE procedure. In addition, given that the test is small (15 items) while the number of examinees is fairly large (n = 2000), there is a concern that the parameters might not have been estimated consistently under this fixed effects Rasch model.  
+
+Random effects Rasch model does have the estimates for the zero and perfect total scores and the marginal maximum likelihood estimates are consistent as $n$ tends to infinity, if the model and the assumed distribution of $\Theta$ is true. Thus, the inconsistency problem of the estimator is solved in the random effects model. However, we rejected the random effects Rasch model earlier when testing against the more general two-parameter logistic model, and correspondingly concluded that the random effects Rasch model did not fit well to the data. Given that we did not reject the extended Rasch model, it is assumed that the normality assumption imposed under the random effects Rasch model (i.e., the latent variable follows a normal distribution) is problematic. It is actually often violated in practice. Hence, although in the random effects Rasch model, we don't have the problem of inconsistency in the estimator nor the problem of not being able to estimate the parameters for the zero/perfect scores, having to specify the population distribution of the latent variable can be troublesome. You might end up rejecting the model because of the misspecification of the latent variable distribution, even when the model actually fits the data.  
+
+In the extended Rasch model, we don't have the problem of misspecifying the distribution of the latent variable, since it is a (latent variable) distribution-free procedure. The only potential problem with the extended Rasch model is that it is not necessarily consistent with a latent variable, meaning that under the extended model, the likelihood function is maximized ignoring the certain inequalities that the parameters should satisfy. However, in this case, it is assumed that the estimates satisfy the inequalities and thus they are also the MLE of the random effects Rasch model. Besides the fact that the extended model does not require any distributional assumption for the latent variable (unlike the random effects Rasch model), the extended model can also estimate the parameters for zero/perfect total scores and does not have the problem of inconsistency in the estimator, which is the drawback of the fixed effects model. Therefore, it is concluded that the extended Rasch model is the most useful and accordingly preferred over the other two models (fixed effects Rasch model and normal random effects Rasch model) that are considered here. 
+
+
+\newpage
+# Appendix
+## Model summary of fixed effects Rasch model
+```{r ref.label="modeloutput", eval=TRUE, echo=FALSE}
+```
+
+## Model summary of random effects Rasch model
+```{r ref.label="summaryrandomRasch", eval=TRUE, echo=FALSE}
+```
+
+## Model summary of extended Rasch model with all predictors including c2 to c15
+```{r ref.label="fit extendedRasch1", eval=TRUE, echo=FALSE}
+```
+
+## Model summary of extended Rasch model with only c2
+```{r ref.label="fit extendedRasch2", eval=TRUE, echo=FALSE}
+```
+
+## Model summary of extended Rasch model with c2 and c3
+```{r ref.label="fit extendedRasch3", eval=TRUE, echo=FALSE}
+```
+
+## Model summary of extended Rasch model with c2, c3, and c4
+```{r ref.label="fit extendedRasch4", eval=TRUE, echo=FALSE}
+```
