@@ -1,3 +1,3 @@
 # Psychometrics
 
-Repository for Psychometrics course @MSBBSS programme
+Repository for the Psychometrics course.
